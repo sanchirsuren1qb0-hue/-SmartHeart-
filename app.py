@@ -12,7 +12,7 @@ try:
 except:
     os.system('python -m textblob.download_corpora')
 
-# Өгөгдөл унших, хадгалах (Алдаанаас сэргийлсэн хувилбар)
+# Өгөгдөл унших, хадгалах (Алдаанаас бүрэн сэргийлсэн)
 def load_json(filename, default_type):
     if not os.path.exists(filename):
         with open(filename, 'w', encoding='utf-8') as f:
@@ -21,10 +21,8 @@ def load_json(filename, default_type):
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             content = json.load(f)
-            # Хэрэв data.json дотор жагсаалт биш зүйл байвал засах
-            if filename == 'data.json' and not isinstance(content, list):
-                return []
-            return content
+            # Хэрэв өгөгдөл жагсаалт байх ёстой газар текст байвал засах
+            return content if isinstance(content, type(default_type)) else default_type
     except:
         return default_type
 
@@ -32,7 +30,7 @@ def save_json(filename, content):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(content, f, ensure_ascii=False, indent=4)
 
-# Гэрлэн дохио ба AI зөвлөмж
+# Гэрлэн дохио болон AI зөвлөмжийн ложик
 def get_status_info(text):
     analysis = TextBlob(text)
     score = analysis.sentiment.polarity
@@ -43,11 +41,12 @@ def get_status_info(text):
     else:
         return "НОГООН", "✅ Багшид: Тогтвортой байна. \n👪 Эцэг эхэд: Урам өг."
 
-def light_html(status):
+# HTML-ээр гэрлэн дохио зурах (TypeError-оос сэргийлж unsafe_allow_html ашиглана)
+def get_light_html(status):
     color = {"УЛААН": "#ff4b4b", "ШАР": "#ffa500", "НОГООН": "#28a745"}.get(status, "#grey")
-    return f'<div style="width:15px;height:15px;background:{color};border-radius:50%;display:inline-block;margin-right:8px;"></div>'
+    return f'<div style="width:15px;height:15px;background-color:{color};border-radius:50%;display:inline-block;margin-right:8px;box-shadow: 0 0 5px {color};"></div>'
 
-# --- APP-ИЙН ЭХЛЭЛ ---
+# --- APP ТОХИРГОО ---
 st.set_page_config(page_title="Ухаалаг Зүрх", page_icon="💖")
 role = st.sidebar.radio("Нэвтрэх хэсэг:", ["Сурагч", "Багш", "Эцэг эх"])
 
@@ -58,12 +57,9 @@ data = load_json('data.json', [])
 if role == "Сурагч":
     st.title("💖 Сурагчийн булан")
     if users:
-        # Сурагч нэрээ жагсаалтаас сонгоно
         names = [v['name'] for k, v in users.items()]
         selected_name = st.selectbox("Нэрээ сонгоно уу:", names)
-        # Тухайн нэртэй сурагчийн кодыг олж авах
-        sid = [k for k, v in users.items() if v['name'] == selected_name][0]
-        
+        sid = next(k for k, v in users.items() if v['name'] == selected_name)
         entered_code = st.text_input("Сурагчийн кодоо оруулна уу:", type="password")
         
         if entered_code == users[sid]['s_code']:
@@ -81,7 +77,12 @@ if role == "Сурагч":
                 data.append(new_entry)
                 save_json('data.json', data)
                 st.balloons()
-                st.success("Илгээгдлээ!")
+                
+                # Халуун дулаан зурвасууд ✨
+                if vis == "Зөвхөн багш харна":
+                    st.info(f"✨ {selected_name} минь, зурвасыг чинь багш нь хүлээн авлаа. Багш нь үргэлж чиний талд байж, чамайг сонсоход бэлэн шүү. Чамд халуун дулаан тэврэлт илгээе! 🤗")
+                else:
+                    st.info(f"✨ {selected_name} минь, зурвасыг чинь багш болон эцэг эх нь хүлээн авлаа. Бид бүгдээрээ чамд хайртай, чамайг үргэлж дэмжих болно. Хамгийн халуун дулаан тэврэлтийг илгээе! ❤️🤗")
         elif entered_code:
             st.error("Сурагчийн код буруу байна.")
     else:
@@ -89,15 +90,19 @@ if role == "Сурагч":
 
 # --- БАГШИЙН ХЭСЭГ ---
 elif role == "Багш":
-    st.title("👩‍🏫 Багш")
+    st.title("👩‍🏫 Багшийн удирдлага")
     if st.text_input("Нууц үг:", type="password") == "1234":
         t1, t2, t3 = st.tabs(["📊 Архив", "➕ Сурагч нэмэх", "🔑 Код хадгалах"])
         
         with t1:
-            for entry in reversed(data):
-                st.markdown(f"**{light_html(entry['status'])} {entry['name']}** | {entry['time']}", unsafe_content_usage=True)
-                st.warning(f"🤖 **AI Зөвлөмж:** \n{entry['advice']}")
-                st.divider()
+            if data:
+                for entry in reversed(data):
+                    # HTML ашиглаж алдаанаас сэргийлэв
+                    st.markdown(f"{get_light_html(entry['status'])} **{entry['name']}** | {entry['time']}", unsafe_allow_html=True)
+                    st.write(f"💬 {entry['msg']}")
+                    st.warning(f"🤖 **AI Зөвлөмж:** \n{entry['advice']}")
+                    st.divider()
+            else: st.info("Одоогоор зурвас ирээгүй байна.")
 
         with t2:
             n_name = st.text_input("Сурагчийн нэр:")
@@ -107,7 +112,7 @@ elif role == "Багш":
                 if n_sid and n_name and n_pcode:
                     users[n_sid] = {"name": n_name, "s_code": n_sid, "p_code": n_pcode}
                     save_json('users.json', users)
-                    st.success("Амжилттай!")
+                    st.success("Амжилттай бүртгэгдлээ!")
 
         with t3:
             if users:
@@ -116,20 +121,15 @@ elif role == "Багш":
 
 # --- ЭЦЭГ ЭХИЙН ХЭСЭГ ---
 elif role == "Эцэг эх":
-    st.title("👪 Эцэг эх")
+    st.title("👪 Эцэг эхийн хяналт")
     p_code = st.text_input("Эцэг эхийн кодоо оруулна уу:")
-    # Эцэг эхийн кодоор сурагчийг хайх
-    child_id = None
-    for k, v in users.items():
-        if v.get('p_code') == p_code:
-            child_id = k
-            break
+    child_id = next((k for k, v in users.items() if v.get('p_code') == p_code), None)
             
     if child_id:
         st.subheader(f"✨ {users[child_id]['name']}-ийн төлөв")
         c_logs = [d for d in data if d['id'] == child_id and d['vis'] == "Багш болон эцэг эх харна"]
         if c_logs:
             latest = c_logs[-1]
-            st.markdown(f"### {light_html(latest['status'])} Төлөв: {latest['status']}", unsafe_content_usage=True)
-            st.warning(f"🤖 **Зөвлөмж:** \n{latest['advice'].split('Эцэг эхэд: ')[1]}")
-        else: st.info("Мэдээлэл байхгүй байна.")
+            st.markdown(f"### {get_light_html(latest['status'])} Төлөв: {latest['status']}", unsafe_allow_html=True)
+            st.warning(f"🤖 **Зөвлөмж:** \n{latest['advice'].split('Эцэг эхэд: ')[1] if 'Эцэг эхэд: ' in latest['advice'] else latest['advice']}")
+        else: st.info("Эцэг эхэд харагдах зурвас одоогоор байхгүй байна.")
