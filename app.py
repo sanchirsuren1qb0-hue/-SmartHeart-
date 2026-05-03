@@ -1,7 +1,8 @@
+import os
+os.system('python -m textblob.download_corpora')
 import streamlit as st
 from textblob import TextBlob
 import json
-import os
 from datetime import datetime
 import pandas as pd
 
