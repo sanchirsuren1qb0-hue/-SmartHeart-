@@ -5,10 +5,14 @@ import os
 from datetime import datetime
 import pandas as pd
 
-# AI сангуудыг бэлтгэх
-os.system('python -m textblob.download_corpora')
+# 1. AI САНГ БЭЛТГЭХ (Зөвлөмж харуулахын тулд заавал байх ёстой)
+try:
+    import nltk
+    nltk.data.find('corpora/movie_reviews')
+except LookupError:
+    os.system('python -m textblob.download_corpora')
 
-# Файл байгаа эсэхийг шалгах, байхгүй бол үүсгэх
+# 2. ӨГӨГДӨЛ ХАДГАЛАХ ФАЙЛУУДЫГ ШАЛГАХ
 def init_files():
     if not os.path.exists('users.json'):
         with open('users.json', 'w') as f: json.dump({}, f)
@@ -17,123 +21,115 @@ def init_files():
 
 init_files()
 
-# Өгөгдөл унших функцууд
-def load_users():
-    with open('users.json', 'r') as f: return json.load(f)
+# Өгөгдөл унших, хадгалах функцууд
+def load_json(filename):
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {} if "users" in filename else []
 
-def save_users(users):
-    with open('users.json', 'w') as f: json.dump(users, f)
+def save_json(filename, content):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(content, f, ensure_ascii=False, indent=4)
 
-def load_data():
-    with open('data.json', 'r') as f: return json.load(f)
-
-def save_data(data):
-    with open('data.json', 'w') as f: json.dump(data, f)
-
-# ГЭРЛЭН ДОХИОНЫ STYLE
-def light_style(status):
-    colors = {"УЛААН": "#ff4b4b", "ШАР": "#ffa500", "НОГООН": "#28a745"}
-    c = colors.get(status, "#grey")
-    return f'<div style="width: 20px; height: 20px; background-color: {c}; border-radius: 50%; display: inline-block; margin-right: 10px; box-shadow: 0 0 10px {c};"></div>'
-
-# AI ЗӨВЛӨМЖ ӨГӨХ ФУНКЦ
-def get_ai_advice(text):
+# 3. ГЭРЛЭН ДОХИО БОЛОН AI ЗӨВЛӨМЖИЙН ЛОГИК
+def get_status_info(text):
     analysis = TextBlob(text)
+    # Хэрэв текст монгол бол сэтгэл хөдлөлийг энгийнээр таних оролдлого
     score = analysis.sentiment.polarity
     
-    if score < -0.2:
-        return "УЛААН", "🆘 Багшид: Нэн яаралтай ганцаарчилж уулзах шаардлагатай. \n👪 Эцэг эхэд: Хүүхэдтэйгээ маш тайван ярилцаж, мэргэжлийн сэтгэл зүйчид хандахыг зөвлөж байна."
+    if score < -0.1 or any(word in text.lower() for word in ['айж', 'айдаг', 'хэцүү', 'муу', 'уйл']):
+        return "УЛААН", "🆘 Багшид: Нэн яаралтай ганцаарчилж уулзах шаардлагатай. \n👪 Эцэг эхэд: Хүүхэдтэйгээ маш тайван ярилцаж, сэтгэл зүйн дэмжлэг үзүүлнэ үү."
     elif score < 0.1:
-        return "ШАР", "⚠️ Багшид: Ойрын хугацаанд анхаарал хандуулж, ажиглаарай. \n👪 Эцэг эхэд: Хүүхдийнхээ сонирхдог зүйлийн талаар ярилцаж, цагийг хамт өнгөрүүлээрэй."
+        return "ШАР", "⚠️ Багшид: Ойрын хугацаанд ажиглаж, ярилцаарай. \n👪 Эцэг эхэд: Хүүхэддээ цаг гаргаж, сонирхдог зүйлсийнх нь талаар ярилцаарай."
     else:
-        return "НОГООН", "✅ Багшид: Сэтгэл зүй тогтвортой байна. Урамшуулаарай. \n👪 Эцэг эхэд: Хүүхдийнхээ эерэг хандлагыг дэмжиж, байнга урам өгч байгаарай."
+        return "НОГООН", "✅ Багшид: Сэтгэл зүй тогтвортой байна. Урамшуулаарай. \n👪 Эцэг эхэд: Хүүхдийнхээ эерэг хандлагыг дэмжиж, байнга урам өгөөрэй."
 
-# APP-ИЙН ҮНДСЭН ХЭСЭГ
+def light_html(status):
+    color = {"УЛААН": "#ff4b4b", "ШАР": "#ffa500", "НОГООН": "#28a745"}.get(status, "#grey")
+    return f'<div style="width:15px;height:15px;background:{color};border-radius:50%;display:inline-block;margin-right:8px;box-shadow:0 0 5px {color};"></div>'
+
+# 4. APP-ИЙН ХАРАГДАЦ (INTERFACE)
 st.set_page_config(page_title="Ухаалаг Зүрх", page_icon="💖")
 st.sidebar.title("Нэвтрэх хэсэг:")
 role = st.sidebar.radio("", ["Сурагч", "Багш", "Эцэг эх"])
 
-users = load_users()
-data = load_data()
+users = load_json('users.json')
+data = load_json('data.json')
 
-# --- СУРАГЧ ХЭСЭГ ---
+# --- СУРАГЧИЙН ХЭСЭГ ---
 if role == "Сурагч":
-    st.title("💖 Ухаалаг Зүрх - Сурагч")
-    student_id = st.text_input("Өөрийн кодыг оруулна уу:")
+    st.title("💖 Ухаалаг Зүрх")
+    st.subheader("Сайн уу? Өнөөдөр сэтгэл санаа нь ямар байна?")
+    sid = st.text_input("Өөрийн кодыг оруулна уу (Жишээ нь: S01):")
     
-    if student_id in users:
-        st.success(f"Сайн уу, {users[student_id]['name']}!")
-        message = st.text_area("Өнөөдөр сэтгэл санаа нь ямар байна? Юу тохиолдсоноо хуваалцаарай...")
-        visibility = st.selectbox("Хэнд харуулах вэ?", ["Багш болон эцэг эх харна", "Зөвхөн багш харна"])
+    if sid in users:
+        st.info(f"Тавтай морил, {users[sid]['name']}!")
+        msg = st.text_area("Юу тохиолдсоноо эсвэл мэдрэмжээ энд бичээрэй...")
+        vis = st.selectbox("Хэнд харуулах вэ?", ["Багш болон эцэг эх харна", "Зөвхөн багш харна"])
         
         if st.button("Илгээх"):
-            status, advice = get_ai_advice(message)
+            status, advice = get_status_info(msg)
             new_entry = {
-                "id": student_id,
-                "name": users[student_id]['name'],
-                "message": message,
-                "status": status,
-                "advice": advice,
-                "visibility": visibility,
+                "id": sid, "name": users[sid]['name'], "msg": msg,
+                "status": status, "advice": advice, "vis": vis,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M")
             }
             data.append(new_entry)
-            save_data(data)
+            save_json('data.json', data)
             st.balloons()
-            st.info("Зурвас амжилттай илгээгдлээ. Өөртөө итгэлтэй байгаарай! ✨")
-    elif student_id:
+            st.success("Зурвас илгээгдлээ. Чи ганцаараа биш шүү! ✨")
+    elif sid:
         st.error("Код буруу байна!")
 
-# --- БАГШ ХЭСЭГ ---
+# --- БАГШИЙН ХЭСЭГ ---
 elif role == "Багш":
     st.title("👩‍🏫 Багшийн удирдлага")
-    password = st.text_input("Нууц үг:", type="password")
+    pw = st.text_input("Нууц үг:", type="password")
     
-    if password == "1234": # Та нууц үгээ энд өөрчилж болно
-        tab1, tab2, tab3 = st.tabs(["📊 Архив", "➕ Сурагч нэмэх", "🔑 Код хадгалах"])
+    if pw == "1234": # Нууц үгээ энд өөрчилж болно
+        t1, t2, t3 = st.tabs(["📊 Сэтгэл зүйн архив", "➕ Сурагч бүртгэх", "🔑 Код хадгалах"])
         
-        with tab1:
-            st.subheader("🗂️ Сэтгэл зүйн архивын жагсаалт")
+        with t1:
+            st.subheader("🗂️ Сурагчдын ирүүлсэн мэдээлэл")
+            if not data: st.write("Одоогоор зурвас ирээгүй байна.")
             for entry in reversed(data):
-                st.markdown(f"### {light_style(entry['status'])} ТӨЛӨВ: {entry['status']}", unsafe_content_usage=True)
-                st.write(f"**Хэнээс:** {entry['name']} | **Цаг:** {entry['time']}")
-                st.info(f"💬 {entry['message']}")
+                st.markdown(f"**{light_html(entry['status'])} {entry['name']}** | {entry['time']}", unsafe_content_usage=True)
+                st.write(f"💬 {entry['msg']}")
                 st.warning(f"🤖 **AI Зөвлөмж:** \n{entry['advice']}")
+                st.caption(f"👁️ Харагдах байдал: {entry['vis']}")
                 st.divider()
 
-        with tab2:
-            st.subheader("➕ Шинэ сурагч бүртгэх")
-            new_name = st.text_input("Сурагчийн нэр:")
-            new_id = st.text_input("Сурагчийн код (Жишээ нь: S01):")
+        with t2:
+            st.subheader("➕ Шинэ сурагч нэмэх")
+            n_name = st.text_input("Сурагчийн нэр:")
+            n_id = st.text_input("Сурагчийн код (S01, S02...):")
             if st.button("Бүртгэх"):
-                if new_id not in users:
-                    users[new_id] = {"name": new_name}
-                    save_users(users)
-                    st.success(f"{new_name} амжилттай бүртгэгдлээ!")
-                else:
-                    st.warning("Энэ код аль хэдийн бүртгэгдсэн байна.")
+                if n_id and n_name:
+                    users[n_id] = {"name": n_name}
+                    save_json('users.json', users)
+                    st.success(f"{n_name} амжилттай бүртгэгдлээ!")
+                else: st.warning("Мэдээллээ бүрэн оруулна уу.")
 
-        with tab3:
+        with t3:
             st.subheader("🔑 Сурагчдын нэвтрэх кодын жагсаалт")
             if users:
-                user_list = [{"Нэр": v['name'], "Нэвтрэх код": k} for k, v in users.items()]
-                st.table(pd.DataFrame(user_list))
-                st.write("💡 Энэ кодыг эцэг эх болон сурагчдад тарааж өгнө үү.")
-            else:
-                st.info("Бүртгэлтэй сурагч байхгүй байна.")
+                user_df = pd.DataFrame([{"Нэр": v['name'], "Нэвтрэх код": k} for k, v in users.items()])
+                st.table(user_df)
+                st.write("💡 Та энэ хүснэгтийг хуулж аваад Excel дээр хадгалаарай.")
+            else: st.info("Бүртгэлтэй сурагч байхгүй байна.")
 
-# --- ЭЦЭГ ЭХ ХЭСЭГ ---
+# --- ЭЦЭГ ЭХИЙН ХЭСЭГ ---
 elif role == "Эцэг эх":
     st.title("👪 Эцэг эхийн хяналт")
-    child_id = st.text_input("Хүүхдийн кодыг оруулна уу:")
+    cid = st.text_input("Хүүхдийн кодыг оруулна уу:")
     
-    if child_id in users:
-        st.subheader(f"✨ {users[child_id]['name']}-ийн төлөв")
-        child_data = [d for d in data if d['id'] == child_id and d['visibility'] == "Багш болон эцэг эх харна"]
-        
-        if child_data:
-            latest = child_data[-1]
-            st.markdown(f"### {light_style(latest['status'])} Сүүлийн төлөв: {latest['status']}", unsafe_content_usage=True)
+    if cid in users:
+        st.subheader(f"✨ {users[cid]['name']}-ийн төлөв байдал")
+        c_logs = [d for d in data if d['id'] == cid and d['vis'] == "Багш болон эцэг эх харна"]
+        if c_logs:
+            latest = c_logs[-1]
+            st.markdown(f"### {light_html(latest['status'])} Төлөв: {latest['status']}", unsafe_content_usage=True)
             st.warning(f"🤖 **Зөвлөмж:** \n{latest['advice'].split('Эцэг эхэд: ')[1]}")
-        else:
-            st.info("Одоогоор мэдээлэл байхгүй байна.")
+        else: st.info("Одоогоор мэдээлэл харагдахгүй байна.")
