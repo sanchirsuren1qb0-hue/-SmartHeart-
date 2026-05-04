@@ -2,140 +2,83 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from openai import OpenAI
-import os
 
-# 1. Хуудасны тохиргоо
-st.set_page_config(page_title="Ухаалаг Зүрх", page_icon="❤️", layout="centered")
+# 1. Page Config
+st.set_page_config(page_title="Ухаалаг Зүрх", page_icon="❤️")
 
-# 2. Google Sheets Холболт
+# 2. Connection with safety
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_users():
-    # Google Sheet-ээс хэрэглэгчийн мэдээллийг унших
+def load_data():
     try:
-        # worksheet="Sheet1" гэдгийг таны Sheets-ийн нэртэй таарууллаа
-        df = conn.read(worksheet="Sheet1")
-        # Хоосон зай болон баганын нэрийг цэвэрлэх
-        df.columns = df.columns.str.strip()
+        # Sheet1-ээс өгөгдлийг унших
+        df = conn.read(worksheet="Sheet1", ttl=0)
+        # Баганын нэрсийг цэвэрлэх
+        df.columns = [str(c).strip() for c in df.columns]
         return df
     except Exception as e:
-        # Хэрэв Sheet-ээс уншиж чадахгүй бол хоосон хүснэгт үүсгэх
         return pd.DataFrame(columns=["Сурагч", "Код", "Эцэг_эх", "Э_код"])
 
-def save_users(df):
-    # Google Sheet рүү мэдээлэл хадгалах
-    conn.update(worksheet="Sheet1", data=df)
-    st.cache_data.clear()
-
-# 3. AI Тохиргоо 
-if "OPENAI_API_KEY" in st.secrets:
+# 3. AI Setup
+try:
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-else:
-    st.error("OpenAI API Key олдохгүй байна. Secrets-дээ шалгана уу.")
+except:
+    st.error("API Key тохируулаагүй байна.")
 
-def analyze_emotion(text):
+def get_ai_advice(text):
     try:
         response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "system", "content": "Чи бол сэтгэл зүйч. Текстийг уншаад Улаан (Аюултай), Шар (Анхаарах), Ногоон (Хэвийн) өнгөөр оношилж зөвлөгөө өг."},
+            model="gpt-3.5-turbo",
+            messages=[{"role": "system", "content": "Чи бол сэтгэл зүйч. Зөвлөгөө өг."},
                       {"role": "user", "content": text}]
         )
         return response.choices[0].message.content
     except:
-        return "AI-тай холбогдоход алдаа гарлаа."
+        return "AI одоогоор хариулах боломжгүй байна."
 
-# 4. Session State (Төлөв хадгалах)
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.username = ""
-    st.session_state.role = ""
+# 4. Login Logic
+if 'auth' not in st.session_state:
+    st.session_state.auth = False
 
-# --- НЭВТРЭХ ХЭСЭГ ---
-if not st.session_state.logged_in:
+if not st.session_state.auth:
     st.title("❤️ Ухаалаг Зүрх")
-    st.subheader("Дижитал өдрийн тэмдэглэл")
-    
-    role = st.radio("Та хэн бэ?", ["Сурагч", "Багш", "Эцэг эх"])
-    username = st.text_input("Нэвтрэх нэр")
-    password = st.text_input("Нууц код", type="password")
+    role = st.selectbox("Та хэн бэ?", ["Сурагч", "Багш", "Эцэг эх"])
+    name = st.text_input("Нэр")
+    pwd = st.text_input("Код", type="password")
 
     if st.button("Нэвтрэх"):
-        df = load_users()
-        
-        if role == "Багш" and username == "admin" and password == "admin123":
-            st.session_state.logged_in = True
-            st.session_state.username = username
+        data = load_data()
+        if role == "Багш" and name == "admin" and pwd == "admin123":
+            st.session_state.auth = True
             st.session_state.role = "Багш"
             st.rerun()
-            
-        elif role == "Сурагч":
-            if not df.empty and 'Сурагч' in df.columns:
-                user_row = df[(df['Сурагч'].astype(str) == str(username)) & (df['Код'].astype(str) == str(password))]
-                if not user_row.empty:
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.role = "Сурагч"
-                    st.rerun()
-                else:
-                    st.error("Нэр эсвэл код буруу байна.")
-            else:
-                st.error("Сурагчдын мэдээлэл хоосон байна.")
-                
-        elif role == "Эцэг эх":
-            if not df.empty and 'Эцэг_эх' in df.columns:
-                user_row = df[(df['Эцэг_эх'].astype(str) == str(username)) & (df['Э_код'].astype(str) == str(password))]
-                if not user_row.empty:
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.role = "Эцэг эх"
-                    st.rerun()
-                else:
-                    st.error("Нэр эсвэл код буруу байна.")
-            else:
-                st.error("Эцэг эхийн мэдээлэл хоосон байна.")
-
-# --- ҮНДСЭН ХЭСЭГ ---
+        elif role == "Сурагч" and not data.empty:
+            user = data[(data['Сурагч'].astype(str) == str(name)) & (data['Код'].astype(str) == str(pwd))]
+            if not user.empty:
+                st.session_state.auth = True
+                st.session_state.role = "Сурагч"
+                st.session_state.name = name
+                st.rerun()
+        elif role == "Эцэг эх" and not data.empty:
+            user = data[(data['Эцэг_эх'].astype(str) == str(name)) & (data['Э_код'].astype(str) == str(pwd))]
+            if not user.empty:
+                st.session_state.auth = True
+                st.session_state.role = "Эцэг эх"
+                st.session_state.name = name
+                st.rerun()
+        else:
+            st.error("Нэвтрэх мэдээлэл буруу байна.")
 else:
-    st.sidebar.title(f"👋 Сайн уу, {st.session_state.username}")
-    if st.sidebar.button("Гарах"):
-        st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.session_state.role = ""
-        st.rerun()
-
-    # БАГШИЙН ХЯНАЛТЫН САМБАР
+    st.sidebar.button("Гарах", on_click=lambda: st.session_state.update({"auth": False}))
+    
     if st.session_state.role == "Багш":
-        st.header("👨‍🏫 Багшийн хяналтын хэсэг")
-        tab1, tab2 = st.tabs(["📊 Сэтгэл зүйн хяналт", "⚙️ Сурагчдын удирдлага"])
-        
-        with tab1:
-            st.write("Энд сурагчдын илгээсэн тэмдэглэл харагдана.")
-
-        with tab2:
-            st.subheader("👥 Сурагчдын жагсаалт")
-            df = load_users()
-            st.dataframe(df)
-            
-            st.markdown("---")
-            st.subheader("❌ Сурагч хасах")
-            if not df.empty and 'Сурагч' in df.columns:
-                user_to_delete = st.selectbox("Хасах сурагчийг сонгоно уу:", df['Сурагч'].unique())
-                if st.button("Сурагчийг жагсаалтаас хасах"):
-                    new_df = df[df['Сурагч'] != user_to_delete]
-                    save_users(new_df)
-                    st.success(f"{user_to_delete} амжилттай хасагдлаа.")
-                    st.rerun()
-
-    # СУРАГЧИЙН ХЭСЭГ
+        st.header("📊 Хяналтын самбар")
+        st.write("Нийт бүртгэлтэй хэрэглэгчид:")
+        st.dataframe(load_data())
     elif st.session_state.role == "Сурагч":
-        st.header("📖 Миний өдрийн тэмдэглэл")
-        note = st.text_area("Өнөөдөр ямар байна? Сэтгэлээ хуваалцаарай...")
+        st.header(f"👋 Сайн уу, {st.session_state.name}")
+        note = st.text_area("Өнөөдөр сэтгэл санаа чинь ямар байна?")
         if st.button("Илгээх"):
             with st.spinner("AI шинжилж байна..."):
-                result = analyze_emotion(note)
-                st.info(f"AI Зөвлөмж: {result}")
-
-    # ЭЦЭГ ЭХИЙН ХЭСЭГ
-    elif st.session_state.role == "Эцэг эх":
-        st.header("👨‍👩‍👧‍👦 Хүүхдийн сэтгэл зүйн байдал")
-        st.write("Таны хүүхдийн сэтгэл зүйн ерөнхий төлөв байдал...")
+                advice = get_ai_advice(note)
+                st.info(advice) 
