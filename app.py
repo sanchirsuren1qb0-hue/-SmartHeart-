@@ -1,4 +1,9 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+
+# Google Sheets холболт тогтоох
+conn = st.connection("gsheets", type=GSheetsConnection)
 from textblob import TextBlob
 import json
 import os
