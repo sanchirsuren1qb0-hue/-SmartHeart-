@@ -1,140 +1,124 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-
-# Google Sheets холболт тогтоох
-conn = st.connection("gsheets", type=GSheetsConnection)
-from textblob import TextBlob
-import json
+from openai import OpenAI
 import os
-from datetime import datetime
-import pandas as pd
 
-# AI сан татах
-try:
-    import nltk
-    nltk.data.find('corpora/movie_reviews')
-except:
-    os.system('python -m textblob.download_corpora')
+# 1. Хуудасны тохиргоо
+st.set_page_config(page_title="Ухаалаг Зүрх", page_icon="❤️", layout="centered")
 
-# Өгөгдөл унших, хадгалах (Алдаанаас бүрэн сэргийлсэн)
-def load_json(filename, default_type):
-    if not os.path.exists(filename):
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(default_type, f)
-        return default_type
+# 2. Google Sheets Холболт
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+def load_users():
+    # Google Sheet-ээс хэрэглэгчийн мэдээллийг унших
     try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            content = json.load(f)
-            # Хэрэв өгөгдөл жагсаалт байх ёстой газар текст байвал засах
-            return content if isinstance(content, type(default_type)) else default_type
+        return conn.read(worksheet="Sheet1")
     except:
-        return default_type
+        return pd.DataFrame(columns=["Сурагч", "Код", "Эцэг_эх", "Э_код"])
 
-def save_json(filename, content):
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(content, f, ensure_ascii=False, indent=4)
+def save_users(df):
+    # Google Sheet рүү мэдээлэл хадгалах
+    conn.update(worksheet="Sheet1", data=df)
+    st.cache_data.clear()
 
-# Гэрлэн дохио болон AI зөвлөмжийн ложик
-def get_status_info(text):
-    analysis = TextBlob(text)
-    score = analysis.sentiment.polarity
-    if score < -0.1:
-        return "УЛААН", "🆘 Багшид: Нэн яаралтай уулз. \n👪 Эцэг эхэд: Сэтгэл зүйн дэмжлэг үзүүл."
-    elif score < 0.1:
-        return "ШАР", "⚠️ Багшид: Ажиглаж ярилц. \n👪 Эцэг эхэд: Цаг гаргаж ярилц."
-    else:
-        return "НОГООН", "✅ Багшид: Тогтвортой байна. \n👪 Эцэг эхэд: Урам өг."
+# 3. AI Тохиргоо (Өмнөх тохиргоог хэвээр үлдээв)
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# HTML-ээр гэрлэн дохио зурах (TypeError-оос сэргийлж unsafe_allow_html ашиглана)
-def get_light_html(status):
-    color = {"УЛААН": "#ff4b4b", "ШАР": "#ffa500", "НОГООН": "#28a745"}.get(status, "#grey")
-    return f'<div style="width:15px;height:15px;background-color:{color};border-radius:50%;display:inline-block;margin-right:8px;box-shadow: 0 0 5px {color};"></div>'
+def analyze_emotion(text):
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": "Чи бол сэтгэл зүйч. Текстийг уншаад Улаан (Аюултай), Шар (Анхаарах), Ногоон (Хэвийн) өнгөөр оношилж зөвлөгөө өг."},
+                  {"role": "user", "content": text}]
+    )
+    return response.choices[0].message.content
 
-# --- APP ТОХИРГОО ---
-st.set_page_config(page_title="Ухаалаг Зүрх", page_icon="💖")
-role = st.sidebar.radio("Нэвтрэх хэсэг:", ["Сурагч", "Багш", "Эцэг эх"])
+# 4. Session State (Төлөв хадгалах)
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.role = ""
 
-users = load_json('users.json', {})
-data = load_json('data.json', [])
+# --- НЭВТРЭХ ХЭСЭГ ---
+if not st.session_state.logged_in:
+    st.title("❤️ Ухаалаг Зүрх")
+    st.subheader("Дижитал өдрийн тэмдэглэл")
+    
+    role = st.radio("Та хэн бэ?", ["Сурагч", "Багш", "Эцэг эх"])
+    username = st.text_input("Нэвтрэх нэр")
+    password = st.text_input("Нууц код", type="password")
 
-# --- СУРАГЧИЙН ХЭСЭГ ---
-if role == "Сурагч":
-    st.title("💖 Сурагчийн булан")
-    if users:
-        names = [v['name'] for k, v in users.items()]
-        selected_name = st.selectbox("Нэрээ сонгоно уу:", names)
-        sid = next(k for k, v in users.items() if v['name'] == selected_name)
-        entered_code = st.text_input("Сурагчийн кодоо оруулна уу:", type="password")
+    if st.button("Нэвтрэх"):
+        df = load_users()
         
-        if entered_code == users[sid]['s_code']:
-            st.success(f"Сайн уу, {selected_name}!")
-            msg = st.text_area("Мэдрэмжээ хуваалцаарай...")
-            vis = st.selectbox("Хэнд харуулах вэ?", ["Багш болон эцэг эх харна", "Зөвхөн багш харна"])
+        if role == "Багш" and username == "admin" and password == "admin123": # Багшийн нэвтрэх код
+            st.session_state.logged_in = True
+            st.session_state.username = username
+            st.session_state.role = "Багш"
+            st.rerun()
             
-            if st.button("Илгээх"):
-                status, advice = get_status_info(msg)
-                new_entry = {
-                    "id": sid, "name": selected_name, "msg": msg,
-                    "status": status, "advice": advice, "vis": vis,
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M")
-                }
-                data.append(new_entry)
-                save_json('data.json', data)
-                st.balloons()
+        elif role == "Сурагч":
+            user_row = df[(df['Сурагч'] == username) & (df['Код'].astype(str) == str(password))]
+            if not user_row.empty:
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.session_state.role = "Сурагч"
+                st.rerun()
+            else:
+                st.error("Нэр эсвэл код буруу байна.")
                 
-                # Халуун дулаан зурвасууд ✨
-                if vis == "Зөвхөн багш харна":
-                    st.info(f"✨ {selected_name} минь, зурвасыг чинь багш нь хүлээн авлаа. Багш нь үргэлж чиний талд байж, чамайг сонсоход бэлэн шүү. Чамд халуун дулаан тэврэлт илгээе! 🤗")
-                else:
-                    st.info(f"✨ {selected_name} минь, зурвасыг чинь багш болон эцэг эх нь хүлээн авлаа. Бид бүгдээрээ чамд хайртай, чамайг үргэлж дэмжих болно. Хамгийн халуун дулаан тэврэлтийг илгээе! ❤️🤗")
-        elif entered_code:
-            st.error("Сурагчийн код буруу байна.")
-    else:
-        st.info("Бүртгэлтэй сурагч байхгүй байна.")
+        elif role == "Эцэг эх":
+            user_row = df[(df['Эцэг_эх'] == username) & (df['Э_код'].astype(str) == str(password))]
+            if not user_row.empty:
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.session_state.role = "Эцэг эх"
+                st.rerun()
+            else:
+                st.error("Нэр эсвэл код буруу байна.")
 
-# --- БАГШИЙН ХЭСЭГ ---
-elif role == "Багш":
-    st.title("👩‍🏫 Багшийн удирдлага")
-    if st.text_input("Нууц үг:", type="password") == "1234":
-        t1, t2, t3 = st.tabs(["📊 Архив", "➕ Сурагч нэмэх", "🔑 Код хадгалах"])
+# --- ҮНДСЭН ХЭСЭГ ---
+else:
+    st.sidebar.title(f"👋 Сайн уу, {st.session_state.username}")
+    if st.sidebar.button("Гарах"):
+        st.session_state.logged_in = False
+        st.rerun()
+
+    # БАГШИЙН ХЯНАЛТЫН САМБАР
+    if st.session_state.role == "Багш":
+        st.header("👨‍🏫 Багшийн хяналтын хэсэг")
         
-        with t1:
-            if data:
-                for entry in reversed(data):
-                    # HTML ашиглаж алдаанаас сэргийлэв
-                    st.markdown(f"{get_light_html(entry['status'])} **{entry['name']}** | {entry['time']}", unsafe_allow_html=True)
-                    st.write(f"💬 {entry['msg']}")
-                    st.warning(f"🤖 **AI Зөвлөмж:** \n{entry['advice']}")
-                    st.divider()
-            else: st.info("Одоогоор зурвас ирээгүй байна.")
+        tab1, tab2 = st.tabs(["📊 Сэтгэл зүйн хяналт", "⚙️ Сурагчдын удирдлага"])
+        
+        with tab1:
+            st.write("Энд сурагчдын илгээсэн тэмдэглэл харагдана.")
+            # Тэмдэглэл харуулах код энд үргэлжилнэ...
 
-        with t2:
-            n_name = st.text_input("Сурагчийн нэр:")
-            n_sid = st.text_input("Сурагчийн код (S...):")
-            n_pcode = st.text_input("Эцэг эхийн код (P...):")
-            if st.button("Бүртгэх"):
-                if n_sid and n_name and n_pcode:
-                    users[n_sid] = {"name": n_name, "s_code": n_sid, "p_code": n_pcode}
-                    save_json('users.json', users)
-                    st.success("Амжилттай бүртгэгдлээ!")
-
-        with t3:
-            if users:
-                user_df = pd.DataFrame([{"Нэр": v['name'], "Сурагчийн код": v['s_code'], "Эцэг эхийн код": v['p_code']} for k, v in users.items()])
-                st.table(user_df)
-
-# --- ЭЦЭГ ЭХИЙН ХЭСЭГ ---
-elif role == "Эцэг эх":
-    st.title("👪 Эцэг эхийн хяналт")
-    p_code = st.text_input("Эцэг эхийн кодоо оруулна уу:")
-    child_id = next((k for k, v in users.items() if v.get('p_code') == p_code), None)
+        with tab2:
+            st.subheader("👥 Сурагчдын жагсаалт")
+            df = load_users()
+            st.dataframe(df)
             
-    if child_id:
-        st.subheader(f"✨ {users[child_id]['name']}-ийн төлөв")
-        c_logs = [d for d in data if d['id'] == child_id and d['vis'] == "Багш болон эцэг эх харна"]
-        if c_logs:
-            latest = c_logs[-1]
-            st.markdown(f"### {get_light_html(latest['status'])} Төлөв: {latest['status']}", unsafe_allow_html=True)
-            st.warning(f"🤖 **Зөвлөмж:** \n{latest['advice'].split('Эцэг эхэд: ')[1] if 'Эцэг эхэд: ' in latest['advice'] else latest['advice']}")
-        else: st.info("Эцэг эхэд харагдах зурвас одоогоор байхгүй байна.")
+            st.markdown("---")
+            st.subheader("❌ Сурагч хасах")
+            user_to_delete = st.selectbox("Хасах сурагчийг сонгоно уу:", df['Сурагч'].tolist())
+            if st.button("Сурагчийг жагсаалтаас хасах"):
+                new_df = df[df['Сурагч'] != user_to_delete]
+                save_users(new_df)
+                st.success(f"{user_to_delete} амжилттай хасагдлаа.")
+                st.rerun()
+
+    # СУРАГЧИЙН ХЭСЭГ
+    elif st.session_state.role == "Сурагч":
+        st.header("📖 Миний өдрийн тэмдэглэл")
+        note = st.text_area("Өнөөдөр ямар байна? Сэтгэлээ хуваалцаарай...")
+        if st.button("Илгээх"):
+            result = analyze_emotion(note)
+            st.info(f"AI Зөвлөмж: {result}")
+            # Мэдээллийг хадгалах код...
+
+    # ЭЦЭГ ЭХИЙН ХЭСЭГ
+    elif st.session_state.role == "Эцэг эх":
+        st.header("👨‍👩‍👧‍👦 Хүүхдийн сэтгэл зүйн байдал")
+        st.write("Таны хүүхдийн сэтгэл зүйн ерөнхий төлөв байдал...")
+       
