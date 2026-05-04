@@ -1,4 +1,4 @@
-st-gsheets-connection
-pandas
 streamlit
-textblob
+streamlit-gsheets
+pandas
+openai
